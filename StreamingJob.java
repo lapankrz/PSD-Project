@@ -153,8 +153,6 @@ public class StreamingJob {
     		message += ". Overall: " + medians[6];
     		return message;
     	}
-    	
-    	public double[] get
     }
     
     public static class AverageAggregate
