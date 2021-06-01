@@ -54,7 +54,43 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction.Context;
 import org.apache.flink.streaming.api.windowing.windows.*;
 import org.apache.flink.api.common.functions.*;
 
-public class StreamingJob {
+public class StreamingJob {    
+    
+//    public class MyProcessWindowFunction 
+//    	extends ProcessWindowFunction<Tuple6<Double, Double, Double, Double, Double, Double>, Double, Double, GlobalWindow> {
+//	
+//    	private Integer windowSize = 10;
+//    	private ValueState<State> state;
+//    	
+//    	@Override
+//        public void open(Configuration parameters) throws Exception {
+//            state = getRuntimeContext().getState(new ValueStateDescriptor<>("myState", State.class));
+//        }
+//    	
+//    	@Override
+//    	public void process(Double key, Context context, Iterable<Tuple6<Double, Double, Double, Double, Double, Double>> input, Collector<Double> out) {
+//    		
+//    		State current = state.value();
+//            if (current == null) {
+//                current = new State();
+//                current.count = 0;
+//                current.mean = 0;
+//            }
+//    		
+//            current.count++;
+//            
+//            Double last = 0.0;
+//            for (Tuple6<Double, Double, Double, Double, Double, Double> in: input) {
+//    			last = in.f0;
+//    		}
+//            
+//            current.mean -= current.mean / 10;
+//            current.mean += last / 10;
+//            state.update(current);
+//
+//    		out.collect(current.mean);
+//    	}
+//	}
 
     public static class Splitter implements FlatMapFunction<String, Tuple6<Double, Double, Double, Double, Double, Double>> {
         
@@ -76,6 +112,14 @@ public class StreamingJob {
             out.collect(new Tuple6(values[0], values[1], values[2],
             					   values[3], values[4], values[5]));
         }
+    }
+    
+    public class Sample {
+    	public Tuple6<Double, Double, Double, Double, Double, Double> values;
+    	
+    	public Sample(Tuple6<Double, Double, Double, Double, Double, Double> values) {
+    		this.values = values;
+    	}
     }
     
     public static class State {
@@ -153,6 +197,30 @@ public class StreamingJob {
     		message += ". Overall: " + medians[6];
     		return message;
     	}
+    	
+    	public double[] get10thQuantiles() {
+    		int n = samples.size();
+    		double[][] sortedSamples = getSortedSamples();
+    		double[] quantiles = new double[7];
+    		for (int i = 0; i < 7; ++i) {
+    			quantiles[i] = sortedSamples[i][n/10];
+    		}
+    		return quantiles;
+    	}
+    	
+    	public double[] getMeansOfSmallest() {
+    		int n = samples.size();
+    		double[][] sortedSamples = getSortedSamples();
+    		double[] smallestMeans = new double[7];
+    		for (int i = 0; i < 7; ++i) {
+    			int max = Math.max(1, n/10);
+    			for (int j = 0; j < max; ++j) {
+    				smallestMeans[i] +=  sortedSamples[i][j];
+    			}
+    			smallestMeans[i] /= max;
+    		}
+    		return smallestMeans;
+    	}
     }
     
     public static class AverageAggregate
@@ -208,6 +276,25 @@ public class StreamingJob {
                 .flatMap(new Splitter())
                 .countWindowAll(windowSize, 1)
                 .aggregate(new AverageAggregate());
+//                .process(new MyProcessWindowFunction());
+                
+//                .reduce(new ReduceFunction<Tuple6<Double, Double, Double, Double, Double, Double>>() {
+//                    public Tuple6<Double, Double, Double, Double, Double, Double> reduce(
+//                    		Tuple6<Double, Double, Double, Double, Double, Double> v1,
+//                    		Tuple6<Double, Double, Double, Double, Double, Double> v2) {
+//                    	double value = v1.f0 + v2.f0;
+//                    	if (n == windowSize) {
+//                    		value /= windowSize;
+//                    	}
+//                    	else if (n > windowSize) {
+//                    		value = v1.f0 - v1.f0 / windowSize;
+//                        	value += v2.f0 / windowSize;
+//                    	}
+//                    	n = n + 1;
+//                    	return new Tuple6<>(value, 0.0, 0.0, 0.0, 0.0, 0.0);
+//                    }
+//                  });
+                
 
         dataStream.print();
 
