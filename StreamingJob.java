@@ -121,22 +121,23 @@ public class StreamingJob {
     		    }
     		}
     		catch (Exception e) {
-            	return;
+            	e.printStackTrace();
             }
     	}
     	
     	public void addSample(Tuple6<Double, Double, Double, Double, Double, Double> sample) {
     		
+    		int lastCount = count;
     		double overall = getOverallValue(sample);
     		samples.add(new Tuple7<>(sample.f0, sample.f1, sample.f2, sample.f3, sample.f4, sample.f5, overall));
     		count++;
     		
-    		if (samples.size() == 30) {
+    		if (lastCount == 29) {
     			fullWindowLoaded = true;
     			calculateFirstMeasures();
     		}
     		
-    		if (fullWindowLoaded) {
+    		if (fullWindowLoaded && lastCount >= 30) {
         		udpateAllMeasures();
     			samples.remove(0);
     		}
@@ -261,35 +262,37 @@ public class StreamingJob {
     		}
     	}
     	
-    	// Returns a list of alerts with info (count, measure type (0-5), sample type (0-6), value of sample)
-    	public Vector<Tuple4<Integer, Integer, Integer, Double>> getAlerts() {
-    		Vector<Tuple4<Integer, Integer, Integer, Double>> alerts = new Vector<Tuple4<Integer, Integer, Integer, Double>>(); 
-    		for (int i = 0; i < 7; ++i) {
-				if (means[i] <= 0.9 * stats[0][i]) {
-					alerts.add(new Tuple4<>(count, 0, i, means[i]));	
-				}
-				if (medians[i] <= 0.9 * stats[1][i]){
-					alerts.add(new Tuple4<>(count, 1, i, medians[i]));	
-				}
-				if (quantiles[i] <= 0.9 * stats[2][i]) {
-					alerts.add(new Tuple4<>(count, 2, i, quantiles[i]));	
-				}
-				if (meansOfSmallest[i] <= 0.9 * stats[3][i]) {
-					alerts.add(new Tuple4<>(count, 3, i, meansOfSmallest[i]));	
-				}
-				if (securityMeasures1[i] <= 0.9 * stats[4][i]) {
-					alerts.add(new Tuple4<>(count, 4, i, securityMeasures1[i]));
-				}
-				if (securityMeasures2[i] <= 0.9 * stats[5][i]) {
-					alerts.add(new Tuple4<>(count, 5, i, securityMeasures2[i]));
-				}
-			}
+    	// Returns a list of alerts with info (count, measure type, sample type (0-6), value of sample)
+    	public Vector<Tuple4<Integer, String, Integer, Double>> getAlerts() {
+    		Vector<Tuple4<Integer, String, Integer, Double>> alerts = new Vector<Tuple4<Integer, String, Integer, Double>>(); 
+    		if (fullWindowLoaded) {
+    			for (int i = 0; i < 7; ++i) {
+    				if (means[i] <= 0.9 * stats[0][i]) {
+    					alerts.add(new Tuple4<>(count, "mean", i, means[i]));	
+    				}
+    				if (medians[i] <= 0.9 * stats[1][i]){
+    					alerts.add(new Tuple4<>(count, "median", i, medians[i]));	
+    				}
+    				if (quantiles[i] <= 0.9 * stats[2][i]) {
+    					alerts.add(new Tuple4<>(count, "10th quantile", i, quantiles[i]));	
+    				}
+    				if (meansOfSmallest[i] <= 0.9 * stats[3][i]) {
+    					alerts.add(new Tuple4<>(count, "mean of 10% smallest", i, meansOfSmallest[i]));	
+    				}
+    				if (securityMeasures1[i] <= 0.9 * stats[4][i]) {
+    					alerts.add(new Tuple4<>(count, "security measure 1", i, securityMeasures1[i]));
+    				}
+    				if (securityMeasures2[i] <= 0.9 * stats[5][i]) {
+    					alerts.add(new Tuple4<>(count, "security measure 2", i, securityMeasures2[i]));
+    				}
+    			}
+    		}
     		return alerts;
     	}
     }
     
     public static class SamplesAggregate
-		implements AggregateFunction<Tuple6<Double, Double, Double, Double, Double, Double>, State, Vector<Tuple4<Integer, Integer, Integer, Double>>> {
+		implements AggregateFunction<Tuple6<Double, Double, Double, Double, Double, Double>, State, Vector<Tuple4<Integer, String, Integer, Double>>> {
 	  
 		@Override
 		public State createAccumulator() {
@@ -303,22 +306,22 @@ public class StreamingJob {
 		}
 	
 		@Override
-		public Vector<Tuple4<Integer, Integer, Integer, Double>> getResult(State accumulator) {
+		public Vector<Tuple4<Integer, String, Integer, Double>> getResult(State accumulator) {
 			return accumulator.getAlerts();
 		}
 	
 		@Override
 		public State merge(State a, State b) {
-			a.count = a.count + b.count;
+			a.count = a.count + b.count + 1;
 			return a;
 		}
 	}
     
-    public static class AlertReducer implements FlatMapFunction<Vector<Tuple4<Integer, Integer, Integer, Double>>,
-    												Tuple4<Integer, Integer, Integer, Double>> {
+    public static class AlertReducer implements FlatMapFunction<Vector<Tuple4<Integer, String, Integer, Double>>,
+    												Tuple4<Integer, String, Integer, Double>> {
 		@Override
-		public void flatMap(Vector<Tuple4<Integer, Integer, Integer, Double>> value,
-				Collector<Tuple4<Integer, Integer, Integer, Double>> out) {
+		public void flatMap(Vector<Tuple4<Integer, String, Integer, Double>> value,
+				Collector<Tuple4<Integer, String, Integer, Double>> out) {
 			value.forEach((alert) -> out.collect(alert));
 		}
 	}
@@ -327,12 +330,10 @@ public class StreamingJob {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
-        int windowSize = 10;
-        int n = 0;
-        DataStream<Tuple4<Integer, Integer, Integer, Double>> dataStream = env
+        DataStream<Tuple4<Integer, String, Integer, Double>> dataStream = env
                 .readTextFile("test_samples.csv")
                 .flatMap(new Splitter())
-                .countWindowAll(windowSize, 1)
+                .countWindowAll(30, 1)
                 .aggregate(new SamplesAggregate())
                 .flatMap(new AlertReducer());
 
