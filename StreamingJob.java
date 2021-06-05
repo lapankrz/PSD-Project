@@ -81,39 +81,44 @@ public class StreamingJob {
     
     public static class State {
     	public int count = 0;
-    	public double[] mean;
     	private double[] shares = { 0.2, 0.2, 0.2, 0.15, 0.15, 0.1 };
-    	public Vector<Tuple6<Double, Double, Double, Double, Double, Double>> samples;
+    	public Vector<Tuple7<Double, Double, Double, Double, Double, Double, Double>> samples;
+    	public boolean fullWindowLoaded = false;
+    	
+    	public double[] means;
+    	public double[] medians;
+    	public double[] quantiles;
+    	public double[] meansOfSmallest;
+    	public double[] securityMeasures1;
+    	public double[] securityMeasures2;
     	
     	public State() {
     		count = 0;
-    		mean = new double[6];
-    		samples = new Vector<Tuple6<Double, Double, Double, Double, Double, Double>>();
+    		samples = new Vector<Tuple7<Double, Double, Double, Double, Double, Double, Double>>();
+    		
+    		means = new double[7];
+    		medians = new double[7];
+    		quantiles = new double[7];
+    		meansOfSmallest = new double[7];
+    		securityMeasures1 = new double[7];
+    		securityMeasures2 = new double[7];
     	}
     	
     	public void addSample(Tuple6<Double, Double, Double, Double, Double, Double> sample) {
-    		if (samples.size() >= 30) {
+    		
+    		double overall = getOverallValue(sample);
+    		samples.add(new Tuple7<>(sample.f0, sample.f1, sample.f2, sample.f3, sample.f4, sample.f5, overall));
+    		count++;
+    		
+    		if (samples.size() == 30) {
+    			fullWindowLoaded = true;
+    			calculateFirstMeasures();
+    		}
+    		
+    		if (fullWindowLoaded) {
+        		udpateAllMeasures();
     			samples.remove(0);
     		}
-    		samples.add(sample);
-    	}
-    	
-    	public double getOverallMean() {
-    		double res = 0.0;
-    		for (int i = 0; i < 6; ++i)
-    		{
-    			res += shares[i] * mean[i];
-    		}
-    		return res;
-    	}
-    	
-    	public String getMeanString() {
-    		String message = "Count: " + count + ". Means:";
-    		for (int i = 0; i < 6; ++i) {
-    			message += " (" + i + ") " + this.mean[i];
-    		}
-    		message += ". Overall: " + this.getOverallMean();
-    		return message;
     	}
     	
     	public double[][] getSortedSamples() {
@@ -121,7 +126,7 @@ public class StreamingJob {
     		double[][] newSamples = new double[7][n];
     		for (int i = 0; i < 6; ++i) {
     			for (int j = 0; j < n; ++j) {
-    				newSamples[i][j] = samples.get(j).getField(i);
+    				newSamples[i][j] = (double)samples.get(j).getField(i);
     				newSamples[6][j] += newSamples[i][j] * shares[i];
     			}
     			Arrays.sort(newSamples[i]);
@@ -130,85 +135,119 @@ public class StreamingJob {
     		return newSamples;
     	}
     	
-    	public double[] getMedians() {
+    	public double getOverallValue(Tuple6<Double, Double, Double, Double, Double, Double> value) {
     		int n = samples.size();
-    		double[][] sortedSamples = getSortedSamples();
-    		double[] medians = new double[7]; // 6 fields + 1 overall
-    		for (int i = 0; i < 7; ++i) {
-	    		if (n % 2 == 0) {
-    				medians[i] = (sortedSamples[i][n/2 - 1] + sortedSamples[i][n/2]) / 2;
-	    		}
-	    		else {
-	    			medians[i] = sortedSamples[i][n/2];
-	    		}
-			}
-    		return medians;
-    	}
-    	
-    	public String getMedianString() {
-    		double[] medians = getMedians();
-    		String message = "Count: " + count + ". Medians:";
+    		double overall = 0.0;
     		for (int i = 0; i < 6; ++i) {
-    			message += " (" + i + ") " + medians[i];
+    			overall += shares[i] * (double)value.getField(i);
     		}
-    		message += ". Overall: " + medians[6];
-    		return message;
+    		return overall;
     	}
     	
-    	public double[] get10thQuantiles() {
+    	
+    	// calculates all measures for the first time after a full window has been loaded
+    	public void calculateFirstMeasures() {
+    		calculateFirstMean();
     		int n = samples.size();
     		double[][] sortedSamples = getSortedSamples();
-    		double[] quantiles = new double[7];
     		for (int i = 0; i < 7; ++i) {
+    			medians[i] = (sortedSamples[i][n/2 - 1] + sortedSamples[i][n/2]) / 2;
     			quantiles[i] = sortedSamples[i][n/10];
-    		}
-    		return quantiles;
-    	}
-    	
-    	public double[] getMeansOfSmallest() {
-    		int n = samples.size();
-    		double[][] sortedSamples = getSortedSamples();
-    		double[] smallestMeans = new double[7];
-    		for (int i = 0; i < 7; ++i) {
-    			int max = Math.max(1, n/10);
-    			for (int j = 0; j < max; ++j) {
-    				smallestMeans[i] +=  sortedSamples[i][j];
+    			for (int j = 0; j < 3; ++j) {
+    				meansOfSmallest[i] += sortedSamples[i][j];
     			}
-    			smallestMeans[i] /= max;
+    			meansOfSmallest[i] /= 3;
     		}
-    		return smallestMeans;
+    		calculateFirstSecurityMeasures1();
+    		calculateFirstSecurityMeasures2();
     	}
     	
-    	public double[] getSecurityMeasure1() {
+    	public void calculateFirstMean() {
     		int n = samples.size();
-    		double[][] sortedSamples = getSortedSamples();
-    		double[] means = { mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], getOverallMean() };
-    		double[] measures = new double[7];
-    		for (int k = 0; k < 7; ++k) {
-    			double sum = 0;
-    			for (int i = 0; i < n; ++i) {
-    				sum += Math.abs(means[k] - sortedSamples[k][i]);
+    		for (int i = 0; i < 7; ++i) {
+    			for (int j = 0; j < n; ++j) {
+    				means[i] += (double)samples.get(j).getField(i);
+    			}
+    			means[i] /= n;
+    		}
+    	}
+    	
+    	public void calculateFirstSecurityMeasures1() { 		
+    		int n = samples.size();
+    		for (int i = 0; i < 7; ++i) {
+    			double sum = 0.0;
+    			for (int j = 0; j < n; ++j) {
+    				sum += Math.abs(means[i] - (double)samples.get(j).getField(i));
         		}
-    			measures[k] = means[k] - (sum / (2 * n));
+    			securityMeasures1[i] = means[i] - (sum / (2 * n));
     		}
-    		return measures;
     	}
     	
-    	public double[] getSecurityMeasure2() {
+    	public void calculateFirstSecurityMeasures2() {
     		int n = samples.size();
-    		double[][] sortedSamples = getSortedSamples();
-    		double[] means = { mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], getOverallMean() };
-    		double[] measures = new double[7];
-    		for (int k = 0; k < 7; ++k) {
-    			double sum = 0;
-    			for (int i = 0; i < n; ++i) {
-    				for (int j = 0; j < n; ++j) {
-        				sum += Math.abs(sortedSamples[k][i] - sortedSamples[k][j]);
+    		for (int i = 0; i < 7; ++i) {
+    			double sum = 0.0;
+    			for (int j = 0; j < n; ++j) {
+    				for (int k = 0; k < n; ++k) {
+        				sum += Math.abs((double)samples.get(j).getField(i) - (double)samples.get(k).getField(i));
     				}
         		}
-    			measures[k] = means[k] - (sum / (2 * n * n));
+    			securityMeasures2[i] = means[i] - (sum / (2 * n * n));
     		}
-    		return measures;
+    	}
+    	
+    	
+    	// updates all measures after a full window has been loaded
+    	public void udpateAllMeasures() { // new value on last position, old value (to be removed) on first position
+    		updateMeans();
+    		updateMedians();
+    		updateQuantiles();
+    		updateMeansOfSmallest();
+    		updateSecurityMeasures1();
+    		updateSecurityMeasures2();
+    	}
+    	
+    	public void updateMeans() {
+    		int n = samples.size();
+    		Tuple7<Double, Double, Double, Double, Double, Double, Double> oldValue = samples.get(0);
+    		Tuple7<Double, Double, Double, Double, Double, Double, Double> newValue = samples.get(n - 1);
+    		for (int i = 0; i < 7; ++i) {
+				means[i] -= (double)oldValue.getField(i) / 30.0;
+				means[i] += (double)newValue.getField(i) / 30.0;
+			}
+    	}
+    	
+    	// TODO
+    	public void updateMedians() { }
+    	public void updateQuantiles() { }
+    	public void updateMeansOfSmallest() { }
+    	
+    	public void updateSecurityMeasures1() {
+    		int n = samples.size();
+    		for (int i = 0; i < 7; ++i) {
+    			securityMeasures1[i] += Math.abs(means[i] - (double)samples.get(0).getField(i)) / (2 * n);
+    			securityMeasures1[i] -= Math.abs(means[i] - (double)samples.get(n-1).getField(i)) / (2 * n);
+    		}
+    	}
+    	
+		public void updateSecurityMeasures2() {
+			int n = samples.size();
+			for (int i = 0; i < 7; ++i) {
+				for (int j = 0; j < n; ++j) {
+					securityMeasures2[i] += Math.abs((double)samples.get(j).getField(i) - (double)samples.get(0).getField(i)) / (2 * n * n);
+	    			securityMeasures2[i] -= Math.abs((double)samples.get(j).getField(i) - (double)samples.get(n-1).getField(i)) / (2 * n * n);
+				}
+    		}
+    	}
+    	
+		// Temporary function returning mean information in a string
+    	public String getMeanString() {
+    		String message = "Count: " + count + ". Means:";
+    		for (int i = 0; i < 6; ++i) {
+    			message += " (" + i + ") " + this.means[i];
+    		}
+    		message += ". Overall: " + this.means[6];
+    		return message;
     	}
     }
     
@@ -222,33 +261,17 @@ public class StreamingJob {
 	
 		@Override
 		public State add(Tuple6<Double, Double, Double, Double, Double, Double> value, State accumulator) {
-			int count = accumulator.count;
-			for (int i = 0; i < 6; ++i)
-			{
-				double newMean = 0.0;
-				if (count < 10) {
-					newMean = (accumulator.mean[i] * (double)count + (double)value.getField(i)) / (double)(count + 1);
-				}
-				else {
-					newMean = accumulator.mean[i] - accumulator.mean[i] / 10.0 + (double)value.getField(i) / 10.0;
-				}
-				accumulator.mean[i] = newMean;
-			}
-			accumulator.count = count + 1;
 			accumulator.addSample(value);
 			return accumulator;
 		}
 	
 		@Override
 		public String getResult(State accumulator) {
-			return accumulator.getMeanString() + "\n" + accumulator.getMedianString();
+			return accumulator.getMeanString();
 		}
 	
 		@Override
 		public State merge(State a, State b) {
-			for (int i = 0; i < 6; ++i) {
-				a.mean[i] = (a.mean[i] * a.count + b.mean[i] * b.count) / (a.count + b.count);
-			}
 			a.count = a.count + b.count;
 			return a;
 		}
