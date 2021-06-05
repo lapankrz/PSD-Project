@@ -34,6 +34,7 @@ package psd;
 import java.util.*;
 import java.util.Arrays;
 import java.lang.*;
+import java.io.*;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.java.tuple.*;
@@ -82,6 +83,7 @@ public class StreamingJob {
     public static class State {
     	public int count = 0;
     	private double[] shares = { 0.2, 0.2, 0.2, 0.15, 0.15, 0.1 };
+    	public double[][] stats;
     	public Vector<Tuple7<Double, Double, Double, Double, Double, Double, Double>> samples;
     	public boolean fullWindowLoaded = false;
     	
@@ -95,6 +97,8 @@ public class StreamingJob {
     	public State() {
     		count = 0;
     		samples = new Vector<Tuple7<Double, Double, Double, Double, Double, Double, Double>>();
+    		stats = new double[6][7];
+    		loadStats();
     		
     		means = new double[7];
     		medians = new double[7];
@@ -102,6 +106,23 @@ public class StreamingJob {
     		meansOfSmallest = new double[7];
     		securityMeasures1 = new double[7];
     		securityMeasures2 = new double[7];
+    	}
+    	
+    	public void loadStats() {
+    		try (BufferedReader br = new BufferedReader(new FileReader("stats.csv"))) {
+    		    String line;
+    		    int lineNum = 0;
+    		    while ((line = br.readLine()) != null) {
+    		        String[] values = line.split(",");
+    		        for (int i = 0; i < values.length; ++i) {
+    		        	stats[lineNum][i] = Double.parseDouble(values[i]);
+    		        }
+    		        lineNum++;
+    		    }
+    		}
+    		catch (Exception e) {
+            	return;
+            }
     	}
     	
     	public void addSample(Tuple6<Double, Double, Double, Double, Double, Double> sample) {
@@ -240,19 +261,35 @@ public class StreamingJob {
     		}
     	}
     	
-		// Temporary function returning mean information in a string
-    	public String getMeanString() {
-    		String message = "Count: " + count + ". Means:";
-    		for (int i = 0; i < 6; ++i) {
-    			message += " (" + i + ") " + this.means[i];
-    		}
-    		message += ". Overall: " + this.means[6];
-    		return message;
+    	// Returns a list of alerts with info (count, measure type (0-5), sample type (0-6), value of sample)
+    	public Vector<Tuple4<Integer, Integer, Integer, Double>> getAlerts() {
+    		Vector<Tuple4<Integer, Integer, Integer, Double>> alerts = new Vector<Tuple4<Integer, Integer, Integer, Double>>(); 
+    		for (int i = 0; i < 7; ++i) {
+				if (means[i] <= 0.9 * stats[0][i]) {
+					alerts.add(new Tuple4<>(count, 0, i, means[i]));	
+				}
+				if (medians[i] <= 0.9 * stats[1][i]){
+					alerts.add(new Tuple4<>(count, 1, i, medians[i]));	
+				}
+				if (quantiles[i] <= 0.9 * stats[2][i]) {
+					alerts.add(new Tuple4<>(count, 2, i, quantiles[i]));	
+				}
+				if (meansOfSmallest[i] <= 0.9 * stats[3][i]) {
+					alerts.add(new Tuple4<>(count, 3, i, meansOfSmallest[i]));	
+				}
+				if (securityMeasures1[i] <= 0.9 * stats[4][i]) {
+					alerts.add(new Tuple4<>(count, 4, i, securityMeasures1[i]));
+				}
+				if (securityMeasures2[i] <= 0.9 * stats[5][i]) {
+					alerts.add(new Tuple4<>(count, 5, i, securityMeasures2[i]));
+				}
+			}
+    		return alerts;
     	}
     }
     
-    public static class AverageAggregate
-		implements AggregateFunction<Tuple6<Double, Double, Double, Double, Double, Double>, State, String> {
+    public static class SamplesAggregate
+		implements AggregateFunction<Tuple6<Double, Double, Double, Double, Double, Double>, State, Vector<Tuple4<Integer, Integer, Integer, Double>>> {
 	  
 		@Override
 		public State createAccumulator() {
@@ -266,8 +303,8 @@ public class StreamingJob {
 		}
 	
 		@Override
-		public String getResult(State accumulator) {
-			return accumulator.getMeanString();
+		public Vector<Tuple4<Integer, Integer, Integer, Double>> getResult(State accumulator) {
+			return accumulator.getAlerts();
 		}
 	
 		@Override
@@ -277,17 +314,27 @@ public class StreamingJob {
 		}
 	}
     
+    public static class AlertReducer implements FlatMapFunction<Vector<Tuple4<Integer, Integer, Integer, Double>>,
+    												Tuple4<Integer, Integer, Integer, Double>> {
+		@Override
+		public void flatMap(Vector<Tuple4<Integer, Integer, Integer, Double>> value,
+				Collector<Tuple4<Integer, Integer, Integer, Double>> out) {
+			value.forEach((alert) -> out.collect(alert));
+		}
+	}
+    
     public static void main(String[] args) throws Exception {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
         int windowSize = 10;
         int n = 0;
-        DataStream<String> dataStream = env
+        DataStream<Tuple4<Integer, Integer, Integer, Double>> dataStream = env
                 .readTextFile("test_samples.csv")
                 .flatMap(new Splitter())
                 .countWindowAll(windowSize, 1)
-                .aggregate(new AverageAggregate());
+                .aggregate(new SamplesAggregate())
+                .flatMap(new AlertReducer());
 
         dataStream.print();
 
