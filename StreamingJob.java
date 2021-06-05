@@ -33,6 +33,7 @@ package psd;
 
 import java.util.*;
 import java.util.Arrays;
+import java.lang.*;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.java.tuple.*;
@@ -176,6 +177,38 @@ public class StreamingJob {
     			smallestMeans[i] /= max;
     		}
     		return smallestMeans;
+    	}
+    	
+    	public double[] getSecurityMeasure1() {
+    		int n = samples.size();
+    		double[][] sortedSamples = getSortedSamples();
+    		double[] means = { mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], getOverallMean() };
+    		double[] measures = new double[7];
+    		for (int k = 0; k < 7; ++k) {
+    			double sum = 0;
+    			for (int i = 0; i < n; ++i) {
+    				sum += Math.abs(means[k] - sortedSamples[k][i]);
+        		}
+    			measures[k] = means[k] - (sum / (2 * n));
+    		}
+    		return measures;
+    	}
+    	
+    	public double[] getSecurityMeasure2() {
+    		int n = samples.size();
+    		double[][] sortedSamples = getSortedSamples();
+    		double[] means = { mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], getOverallMean() };
+    		double[] measures = new double[7];
+    		for (int k = 0; k < 7; ++k) {
+    			double sum = 0;
+    			for (int i = 0; i < n; ++i) {
+    				for (int j = 0; j < n; ++j) {
+        				sum += Math.abs(sortedSamples[k][i] - sortedSamples[k][j]);
+    				}
+        		}
+    			measures[k] = means[k] - (sum / (2 * n * n));
+    		}
+    		return measures;
     	}
     }
     
