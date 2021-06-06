@@ -85,7 +85,9 @@ public class StreamingJob {
     	private double[] shares = { 0.2, 0.2, 0.2, 0.15, 0.15, 0.1 };
     	public double[][] stats;
     	public Vector<Tuple7<Double, Double, Double, Double, Double, Double, Double>> samples;
-    	public boolean fullWindowLoaded = false;
+		public boolean fullWindowLoaded = false;
+		
+		public double[][] minimalThree;
     	
     	public double[] means;
     	public double[] medians;
@@ -237,12 +239,108 @@ public class StreamingJob {
 				means[i] -= (double)oldValue.getField(i) / 30.0;
 				means[i] += (double)newValue.getField(i) / 30.0;
 			}
-    	}
-    	
-    	// TODO
-    	public void updateMedians() { }
-    	public void updateQuantiles() { }
-    	public void updateMeansOfSmallest() { }
+		}
+		
+		// partition function similar to quick sort, source: geeksforgeeks.org
+		public static int partition(double[] arr, int low, int high)
+		{
+			double pivot = arr[high];
+			int pivotloc = low;
+			for (int i = low; i <= high; i++) {
+				// inserting elements of less value
+				// to the left of the pivot location
+				if (arr[i] < pivot) {
+					double temp = arr[i];
+					arr[i] = arr[pivotloc];
+					arr[pivotloc] = temp;
+					pivotloc++;
+				}
+			}
+	
+			// swapping pivot to the final pivot location
+			double temp = arr[high];
+			arr[high] = arr[pivotloc];
+			arr[pivotloc] = temp;
+	
+			return pivotloc;
+		}
+	
+		// finds the kth position (of the sorted array) in a given unsorted array, source: geeksforgeeks.org
+		public static double kthSmallest(double[] arr, int low, int high, int k)
+		{
+			// find the partition
+			int partition = partition(arr, low, high);
+	
+			// if partition value is equal to the kth position,
+			// return value at k.
+			if (partition == k - 1)
+				return arr[partition];
+	
+			// if partition value is less than kth position,
+			// search right side of the array.
+			else if (partition < k - 1)
+				return kthSmallest(arr, partition + 1, high, k);
+	
+			// if partition value is more than kth position,
+			// search left side of the array.
+			else
+				return kthSmallest(arr, low, partition - 1, k);
+		}
+
+    	public void updateMedians() {
+			int n = samples.size();
+    		double[][] newSamples = new double[7][n];
+    		for (int i = 0; i < 6; ++i) {
+    			for (int j = 0; j < n; ++j) {
+    				newSamples[i][j] = (double)samples.get(j).getField(i);
+    				newSamples[6][j] += newSamples[i][j] * shares[i];
+    			}
+				medians[i] = kthSmallest(newSamples[i],0,n-1,n/2-1);
+				medians[i] += kthSmallest(newSamples[i],0,n-1,n/2);
+				medians[i] /= 2.0;
+    		}
+			medians[6] = kthSmallest(newSamples[6],0,n-1,n/2-1);
+			medians[6] += kthSmallest(newSamples[6],0,n-1,n/2);
+			medians[6] /= 2.0;
+		}
+
+		public void initMinimalThree(){
+			double[][] sortedSamples = getSortedSamples();
+			for (int i = 0; i < 6; ++i) {
+				for (int j = 0; j < 3; ++j) {
+					minimalThree[i][j] = sortedSamples[i][j];
+				}
+			}
+		}
+
+    	public void updateQuantiles() {
+			int n = samples.size();
+			if(minimalThree == null){
+				initMinimalThree();
+			}
+			for (int i = 0; i < 7; ++i) {
+				if ((double)samples.get(0).getField(i) < minimalThree[i][2]){
+					double[][] sortedSamples = getSortedSamples();
+					for (int j = 0; j < 3; ++j) {
+						minimalThree[i][j] = sortedSamples[i][j];
+					}
+				}
+				if ((double)samples.get(n-1).getField(i) < minimalThree[i][2]){
+					minimalThree[i][2] = (double)samples.get(n-1).getField(i);
+					Arrays.sort(minimalThree[i]);
+				}
+				quantiles[i] = minimalThree[i][2];
+    		}
+		}
+    	public void updateMeansOfSmallest() {
+			for (int i = 0; i < 7; ++i) {
+				meansOfSmallest[i] = 0.;
+				for(int j = 0; j < 3; j++){
+					meansOfSmallest[i] += minimalThree[i][j];
+				}
+				meansOfSmallest[i] /= 3.;
+			}
+		}
     	
     	public void updateSecurityMeasures1() {
     		int n = samples.size();
