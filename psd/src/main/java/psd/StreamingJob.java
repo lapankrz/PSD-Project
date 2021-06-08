@@ -102,6 +102,8 @@ public class StreamingJob {
     		stats = new double[6][7];
     		loadStats();
     		
+    		minimalThree = new double[7][3];
+    		
     		means = new double[7];
     		medians = new double[7];
     		quantiles = new double[7];
@@ -159,8 +161,17 @@ public class StreamingJob {
     		return newSamples;
     	}
     	
+    	public double[] getSortedSamplesForField(int i, int start, int end) {
+    		double[] newSamples = new double[end - start + 1];
+    		for (int j = start; j <= end; ++j) {
+				newSamples[j] = (double)samples.get(j).getField(i);
+				newSamples[j] += newSamples[j] * shares[i];
+			}
+			Arrays.sort(newSamples);
+    		return newSamples;
+    	}
+    	
     	public double getOverallValue(Tuple6<Double, Double, Double, Double, Double, Double> value) {
-    		int n = samples.size();
     		double overall = 0.0;
     		for (int i = 0; i < 6; ++i) {
     			overall += shares[i] * (double)value.getField(i);
@@ -175,12 +186,14 @@ public class StreamingJob {
     		int n = samples.size();
     		double[][] sortedSamples = getSortedSamples();
     		for (int i = 0; i < 7; ++i) {
-    			medians[i] = (sortedSamples[i][n/2 - 1] + sortedSamples[i][n/2]) / 2;
+    			medians[i] = (sortedSamples[i][n/2 - 1] + sortedSamples[i][n/2]) / 2.0;
     			quantiles[i] = sortedSamples[i][n/10];
     			for (int j = 0; j < 3; ++j) {
     				meansOfSmallest[i] += sortedSamples[i][j];
+    				minimalThree[i][j] = sortedSamples[i][j];
     			}
-    			meansOfSmallest[i] /= 3;
+    			meansOfSmallest[i] /= 3.0;
+    			Arrays.sort(minimalThree[i]);
     		}
     		calculateFirstSecurityMeasures1();
     		calculateFirstSecurityMeasures2();
@@ -219,7 +232,6 @@ public class StreamingJob {
     			securityMeasures2[i] = means[i] - (sum / (2 * n * n));
     		}
     	}
-    	
     	
     	// updates all measures after a full window has been loaded
     	public void udpateAllMeasures() { // new value on last position, old value (to be removed) on first position
@@ -288,54 +300,43 @@ public class StreamingJob {
 		}
 
     	public void updateMedians() {
-			int n = samples.size();
+			int n = samples.size() - 1;
     		double[][] newSamples = new double[7][n];
     		for (int i = 0; i < 6; ++i) {
-    			for (int j = 0; j < n; ++j) {
+    			for (int j = 1; j <= n; ++j) {
     				newSamples[i][j] = (double)samples.get(j).getField(i);
     				newSamples[6][j] += newSamples[i][j] * shares[i];
     			}
-				medians[i] = kthSmallest(newSamples[i],0,n-1,n/2-1);
-				medians[i] += kthSmallest(newSamples[i],0,n-1,n/2);
+				medians[i] = kthSmallest(newSamples[i], 0, n-1, n/2-1);
+				medians[i] += kthSmallest(newSamples[i], 0, n-1, n/2);
 				medians[i] /= 2.0;
     		}
-			medians[6] = kthSmallest(newSamples[6],0,n-1,n/2-1);
-			medians[6] += kthSmallest(newSamples[6],0,n-1,n/2);
+			medians[6] = kthSmallest(newSamples[6], 0, n-1, n/2-1);
+			medians[6] += kthSmallest(newSamples[6], 0, n-1, n/2);
 			medians[6] /= 2.0;
 		}
 
-		public void initMinimalThree(){
-			double[][] sortedSamples = getSortedSamples();
-			for (int i = 0; i < 6; ++i) {
-				for (int j = 0; j < 3; ++j) {
-					minimalThree[i][j] = sortedSamples[i][j];
-				}
-			}
-		}
-
     	public void updateQuantiles() {
-			int n = samples.size();
-			if(minimalThree == null){
-				initMinimalThree();
-			}
+			int n = samples.size() - 1;
 			for (int i = 0; i < 7; ++i) {
-				if ((double)samples.get(0).getField(i) < minimalThree[i][2]){
-					double[][] sortedSamples = getSortedSamples();
+				if ((double)samples.get(0).getField(i) <= minimalThree[i][2]) {
+					double[] sortedSamples = getSortedSamplesForField(i, 1, n);
 					for (int j = 0; j < 3; ++j) {
-						minimalThree[i][j] = sortedSamples[i][j];
+						minimalThree[i][j] = sortedSamples[j];
 					}
 				}
-				if ((double)samples.get(n-1).getField(i) < minimalThree[i][2]){
-					minimalThree[i][2] = (double)samples.get(n-1).getField(i);
+				else if ((double)samples.get(n).getField(i) < minimalThree[i][2]) {
+					minimalThree[i][2] = (double)samples.get(n).getField(i);
 					Arrays.sort(minimalThree[i]);
 				}
 				quantiles[i] = minimalThree[i][2];
     		}
 		}
+    	
     	public void updateMeansOfSmallest() {
 			for (int i = 0; i < 7; ++i) {
 				meansOfSmallest[i] = 0.;
-				for(int j = 0; j < 3; j++){
+				for(int j = 0; j < 3; j++) {
 					meansOfSmallest[i] += minimalThree[i][j];
 				}
 				meansOfSmallest[i] /= 3.;
@@ -351,11 +352,11 @@ public class StreamingJob {
     	}
     	
 		public void updateSecurityMeasures2() {
-			int n = samples.size();
+			int n = samples.size() - 1;
 			for (int i = 0; i < 7; ++i) {
 				for (int j = 0; j < n; ++j) {
 					securityMeasures2[i] += Math.abs((double)samples.get(j).getField(i) - (double)samples.get(0).getField(i)) / (2 * n * n);
-	    			securityMeasures2[i] -= Math.abs((double)samples.get(j).getField(i) - (double)samples.get(n-1).getField(i)) / (2 * n * n);
+	    			securityMeasures2[i] -= Math.abs((double)samples.get(j+1).getField(i) - (double)samples.get(n-1).getField(i)) / (2 * n * n);
 				}
     		}
     	}
@@ -365,22 +366,22 @@ public class StreamingJob {
     		Vector<Tuple4<Integer, String, Integer, Double>> alerts = new Vector<Tuple4<Integer, String, Integer, Double>>(); 
     		if (fullWindowLoaded) {
     			for (int i = 0; i < 7; ++i) {
-    				if (means[i] <= 0.9 * stats[0][i]) {
+    				if (means[i] < stats[0][i] && (stats[0][i] - means[i]) / (1 + stats[0][i]) >= 0.05) {
     					alerts.add(new Tuple4<>(count, "mean", i, means[i]));	
     				}
-    				if (medians[i] <= 0.9 * stats[1][i]){
+    				if (medians[i] < stats[1][i] && (stats[1][i] - medians[i]) / (1 + stats[1][i]) >= 0.05) {
     					alerts.add(new Tuple4<>(count, "median", i, medians[i]));	
     				}
-    				if (quantiles[i] <= 0.9 * stats[2][i]) {
+    				if (quantiles[i] < stats[2][i] && (stats[2][i] - quantiles[i]) / (1 + stats[2][i]) >= 0.05) {
     					alerts.add(new Tuple4<>(count, "10th quantile", i, quantiles[i]));	
     				}
-    				if (meansOfSmallest[i] <= 0.9 * stats[3][i]) {
+    				if (meansOfSmallest[i] < stats[3][i] && (stats[3][i] - meansOfSmallest[i]) / (1 + stats[3][i]) >= 0.05) {
     					alerts.add(new Tuple4<>(count, "mean of 10% smallest", i, meansOfSmallest[i]));	
     				}
-    				if (securityMeasures1[i] <= 0.9 * stats[4][i]) {
+    				if (securityMeasures1[i] < stats[4][i] && (stats[4][i] - securityMeasures1[i]) / (1 + stats[4][i]) >= 0.05) {
     					alerts.add(new Tuple4<>(count, "security measure 1", i, securityMeasures1[i]));
     				}
-    				if (securityMeasures2[i] <= 0.9 * stats[5][i]) {
+    				if (securityMeasures2[i] < stats[5][i] && (stats[5][i] - securityMeasures2[i]) / (1 + stats[5][i]) >= 0.05) {
     					alerts.add(new Tuple4<>(count, "security measure 2", i, securityMeasures2[i]));
     				}
     			}
