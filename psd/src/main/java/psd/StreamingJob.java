@@ -366,22 +366,22 @@ public class StreamingJob {
     		Vector<Tuple4<Integer, String, Integer, Double>> alerts = new Vector<Tuple4<Integer, String, Integer, Double>>(); 
     		if (fullWindowLoaded) {
     			for (int i = 0; i < 7; ++i) {
-    				if (means[i] < stats[0][i] && (stats[0][i] - means[i]) / (1 + stats[0][i]) >= 0.05) {
+    				if (means[i] < stats[0][i] && (stats[0][i] - means[i]) / (1 + stats[0][i]) >= 0.01) {
     					alerts.add(new Tuple4<>(count, "mean", i, means[i]));	
     				}
-    				if (medians[i] < stats[1][i] && (stats[1][i] - medians[i]) / (1 + stats[1][i]) >= 0.05) {
+    				if (medians[i] < stats[1][i] && (stats[1][i] - medians[i]) / (1 + stats[1][i]) >= 0.01) {
     					alerts.add(new Tuple4<>(count, "median", i, medians[i]));	
     				}
-    				if (quantiles[i] < stats[2][i] && (stats[2][i] - quantiles[i]) / (1 + stats[2][i]) >= 0.05) {
+    				if (quantiles[i] < stats[2][i] && (stats[2][i] - quantiles[i]) / (1 + stats[2][i]) >= 0.01) {
     					alerts.add(new Tuple4<>(count, "10th quantile", i, quantiles[i]));	
     				}
-    				if (meansOfSmallest[i] < stats[3][i] && (stats[3][i] - meansOfSmallest[i]) / (1 + stats[3][i]) >= 0.05) {
+    				if (meansOfSmallest[i] < stats[3][i] && (stats[3][i] - meansOfSmallest[i]) / (1 + stats[3][i]) >= 0.01) {
     					alerts.add(new Tuple4<>(count, "mean of 10% smallest", i, meansOfSmallest[i]));	
     				}
-    				if (securityMeasures1[i] < stats[4][i] && (stats[4][i] - securityMeasures1[i]) / (1 + stats[4][i]) >= 0.05) {
+    				if (securityMeasures1[i] < stats[4][i] && (stats[4][i] - securityMeasures1[i]) / (1 + stats[4][i]) >= 0.01) {
     					alerts.add(new Tuple4<>(count, "security measure 1", i, securityMeasures1[i]));
     				}
-    				if (securityMeasures2[i] < stats[5][i] && (stats[5][i] - securityMeasures2[i]) / (1 + stats[5][i]) >= 0.05) {
+    				if (securityMeasures2[i] < stats[5][i] && (stats[5][i] - securityMeasures2[i]) / (1 + stats[5][i]) >= 0.01) {
     					alerts.add(new Tuple4<>(count, "security measure 2", i, securityMeasures2[i]));
     				}
     			}
