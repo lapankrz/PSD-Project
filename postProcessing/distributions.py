@@ -1,6 +1,6 @@
-""" Program to create box plots for each asset and statistic
+""" Program to create distribution plots for each asset and statistic
 
-    Progrom creates box plots for each asset and statistic
+    Progrom creates distribution plots for each asset and statistic
     and save them in image files
 """
 __author__ = "Krzysztof Łapan, Maciej Morawski"

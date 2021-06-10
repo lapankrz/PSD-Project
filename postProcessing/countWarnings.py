@@ -1,6 +1,6 @@
 """ Program to count warnings for each asset and statistic
 
-    Progrom counts warnings for each asset and statistic
+    Program counts warnings for each asset and statistic
     and save countings in text file 'countings.txt
 """
 __author__ = "Krzysztof Łapan, Maciej Morawski"
